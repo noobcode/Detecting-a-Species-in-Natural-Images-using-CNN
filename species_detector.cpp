@@ -122,6 +122,7 @@ void find_regions_from_clusters(vector<Point2f>* centroids, vector<Point2f>* poi
 void draw_boxes(Mat* image, vector<Rect>* regions);
 void draw_boxes(Mat* image,  vector<Rect>* boxes, Scalar color);
 int threshold_selection(Mat* image);
+void remove_outliers(vector<Point2f>* centroids, vector<Point2f>* points, Mat* labels);
 
 // UTILITY FUNCTIONS
 pair<Mat, vector<Rect>* >* init_from_gt_file(string file_i); // from a file, return the image and the ground-truth boxes
@@ -794,7 +795,7 @@ void dump_score_vectors(Classifier classifier, ifstream& im_file, string dir){
 
 /* ======== DETECTION FUNCTIONS ============= */
 vector<Rect>* region_proposal(Mat* image){
-  Mat image_gray, th_image, labels, centers;
+  Mat image_gray, th_image;
   vector<Rect>* cnn_regions = new vector<Rect>;
   vector<Point2f>* centroids = new vector<Point2f>;
   // 1. Convert the image to Gray
@@ -808,9 +809,12 @@ vector<Rect>* region_proposal(Mat* image){
   vector<Point2f> points = get_centers(regions);
   // 5. multi-clustering
   for(int i = 1; i <= K; i++){
+    Mat labels, centers;
     kmeans(points, i, labels, TermCriteria( TermCriteria::EPS+TermCriteria::COUNT, 100, 1), 5, KMEANS_PP_CENTERS, centers);
     // get centroids
     get_centroids(&centers, centroids, i);
+    // remove outliers
+    remove_outliers(centroids, &points, &labels);
     // get cnn regions
     find_regions_from_clusters(centroids, &points, &labels, i, cnn_regions);
   }
@@ -902,6 +906,8 @@ void find_regions_from_clusters(vector<Point2f>* centroids, vector<Point2f>* poi
   // use array[4] and each time you encounter a point of that cluster update mins and maxs
   // create rectangle Rect(min_x, min_y, max_x - min_x, max_y - min_y)
   // push Rect to cnn_regions
+
+  // 1. remove outliers
   vector<vector<int> > c_extremes(K, vector<int>(4));
   
   // initialize mins = MAX_INT, max = 0
@@ -920,13 +926,13 @@ void find_regions_from_clusters(vector<Point2f>* centroids, vector<Point2f>* poi
     c_extremes[cluster_id][3] = c_extremes[cluster_id][3] > p.y ? c_extremes[cluster_id][3] : p.y;
   }
   
+  cout << "k = " << to_string(K) << endl;
   for(int i = 0; i < K; i++){
     int x = c_extremes[i][0];
     int y = c_extremes[i][1];
     int width = c_extremes[i][2] - x;
     int height = c_extremes[i][3] - y;
     cnn_regions->push_back(Rect(x, y, width, height));
-    cout << "k=" << to_string(K) << endl;
     cout << x << "," << y << " " << x + width << "," << y + height << endl;
   }
 }
@@ -1097,7 +1103,7 @@ void test_proposal_f1_score_vs_iou(string directory){
 #if 1
     // write images
     string dir = "/home/carlo/bristoluni/short_individual_project/both_boxes/";
-    string det = "multi_clusters/";
+    string det = "no_outliers/";
     draw_boxes(&img,  gt_boxes, Scalar(0,255,0));
     draw_boxes(&img,  p_regions, Scalar(0,0,255));
     imwrite(dir + det + to_string(i) + ".jpg", img);
@@ -1143,7 +1149,7 @@ void dump_IoU_F1(vector<pair<float, float> >* overall_IoU_F1){
   string IoU = "";
   string f1_score = "";
   ofstream outfile;
-  outfile.open("./myexperiments/proposals/iou_vs_f1scores_multi_clusters.txt");
+  outfile.open("./myexperiments/proposals/iou_vs_f1scores_no_outliers.txt");
   int len = overall_IoU_F1->size();
   
   for(int i  = 0; i < len; i++){
@@ -1203,4 +1209,34 @@ int threshold_selection(Mat* image){
     it++;
   }
   return th_i;
+}
+
+void remove_outliers(vector<Point2f>* centroids, vector<Point2f>* points, Mat* labels){
+  vector<float> st_deviations = vector<float>(centroids->size(), 0);
+  vector<int> cluster_sizes = vector<int>(centroids->size(), 0);
+  // compute variance
+  for(unsigned int i = 0; i <  points->size(); i++){
+    Point2f* p = &((*points)[i]);
+    int cluster_id = labels->at<int>(i);
+    Point2f mu = (*centroids)[cluster_id];
+    float distance = sqrt((p->x - mu.x) * (p->x - mu.x) + (p->y - mu.y) * (p->y - mu.y)); // euclidean distance
+    st_deviations[cluster_id] += distance;
+    cluster_sizes[cluster_id]++;
+  }
+  // get standard deviation
+  for(unsigned int i = 0; i < st_deviations.size(); i++){
+    st_deviations[i] /= cluster_sizes[i];
+    printf("std %d: %.3f\n", i, st_deviations[i]);
+  }
+  // determine outliers (those that are distant more than 2 std from the centroid
+  for(unsigned int i = 0; i < points->size(); i++){
+    int cluster_id = labels->at<int>(i);
+    Point2f* p = &((*points)[i]);
+    Point2f mu = (*centroids)[cluster_id];
+    float distance = sqrt((p->x - mu.x) * (p->x - mu.x) + (p->y - mu.y) * (p->y - mu.y));
+    if( distance > 2 * st_deviations[cluster_id]){
+      p->x = mu.x;
+      p->y = mu.y;
+    }
+  }
 }
