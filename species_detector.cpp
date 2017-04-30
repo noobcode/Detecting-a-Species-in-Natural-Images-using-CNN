@@ -343,15 +343,13 @@ int main(int argc, char** argv) {
 
   // DETECTION
   namedWindow("after region proposal", 2);
+  fprintf(stderr, "line: %d\n", __LINE__);
   vector<Rect>* p_regions = region_proposal(&img);
+  fprintf(stderr, "line: %d\n", __LINE__);
   Mat cnn_regions = img.clone();
   draw_boxes(&cnn_regions, p_regions);
   //imshow("after region proposal", cnn_regions); // visualize regions
   vector<Detection>* c_regions = region_classification(&img, p_regions, classifier);
-  
-  // 1. function that returns regions with high probabilities
-  // 2. function that does region merging
-  // 3. draw boxes
 
   namedWindow("after cnn detection", 1);
   Mat final_image = img.clone();
@@ -802,8 +800,9 @@ vector<Rect>* region_proposal(Mat* image){
   // Convert the image to Gray
   cvtColor(*image, image_gray, CV_BGR2GRAY );
   // threshold
-  //threshold_value = threshold_selection(&image_gray);
-  threshold( image_gray, th_image, threshold_value, max_BINARY_value, threshold_type );
+  int selected_th = threshold_selection(&image_gray);
+  fprintf(stderr,"selected threshold: %d\n, line: %d\n", selected_th, __LINE__);
+  threshold( image_gray, th_image, selected_th, max_BINARY_value, threshold_type );
   // window proposal
   vector<Rect> regions = proposal(&th_image);
   // window centers
@@ -1187,7 +1186,7 @@ int threshold_selection(Mat* image){
     vector<pair<Point, int> > g2;
     for(int i = 0; i < image->rows; i++){
       for(int j = 0; j < image->cols; j++){
-	int value = image->at<uchar>(j, i);
+	int value = image->at<uchar>(i, j);
 	if(value > th_i)
 	  g1.push_back(pair<Point, int>(Point(j,i), value));
 	else
