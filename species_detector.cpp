@@ -343,9 +343,7 @@ int main(int argc, char** argv) {
 
   // DETECTION
   namedWindow("after region proposal", 2);
-  fprintf(stderr, "line: %d\n", __LINE__);
   vector<Rect>* p_regions = region_proposal(&img);
-  fprintf(stderr, "line: %d\n", __LINE__);
   Mat cnn_regions = img.clone();
   draw_boxes(&cnn_regions, p_regions);
   //imshow("after region proposal", cnn_regions); // visualize regions
@@ -797,24 +795,25 @@ void dump_score_vectors(Classifier classifier, ifstream& im_file, string dir){
 /* ======== DETECTION FUNCTIONS ============= */
 vector<Rect>* region_proposal(Mat* image){
   Mat image_gray, th_image, labels, centers;
-  // Convert the image to Gray
-  cvtColor(*image, image_gray, CV_BGR2GRAY );
-  // threshold
-  int selected_th = threshold_selection(&image_gray);
-  fprintf(stderr,"selected threshold: %d\n, line: %d\n", selected_th, __LINE__);
-  threshold( image_gray, th_image, selected_th, max_BINARY_value, threshold_type );
-  // window proposal
-  vector<Rect> regions = proposal(&th_image);
-  // window centers
-  vector<Point2f> points = get_centers(regions);
-  // clustering
-  kmeans(points, K, labels, TermCriteria( TermCriteria::EPS+TermCriteria::COUNT, 100, 1), 5, KMEANS_PP_CENTERS, centers);
-  // get centroids
-  vector<Point2f>* centroids = new vector<Point2f>;
-  get_centroids(&centers, centroids, K);
-  // get cnn regions
   vector<Rect>* cnn_regions = new vector<Rect>;
-  find_regions_from_clusters(centroids, &points, &labels, K, cnn_regions);
+  vector<Point2f>* centroids = new vector<Point2f>;
+  // 1. Convert the image to Gray
+  cvtColor(*image, image_gray, CV_BGR2GRAY );
+  // 2. threshold
+  int selected_th = threshold_selection(&image_gray);
+  threshold( image_gray, th_image, selected_th, max_BINARY_value, threshold_type );
+  // 3. window proposal
+  vector<Rect> regions = proposal(&th_image);
+  // 4. window centers
+  vector<Point2f> points = get_centers(regions);
+  // 5. multi-clustering
+  for(int i = 1; i <= K; i++){
+    kmeans(points, i, labels, TermCriteria( TermCriteria::EPS+TermCriteria::COUNT, 100, 1), 5, KMEANS_PP_CENTERS, centers);
+    // get centroids
+    get_centroids(&centers, centroids, i);
+    // get cnn regions
+    find_regions_from_clusters(centroids, &points, &labels, i, cnn_regions);
+  }
   return cnn_regions;
 }
 
@@ -927,6 +926,7 @@ void find_regions_from_clusters(vector<Point2f>* centroids, vector<Point2f>* poi
     int width = c_extremes[i][2] - x;
     int height = c_extremes[i][3] - y;
     cnn_regions->push_back(Rect(x, y, width, height));
+    cout << "k=" << to_string(K) << endl;
     cout << x << "," << y << " " << x + width << "," << y + height << endl;
   }
 }
@@ -1097,7 +1097,7 @@ void test_proposal_f1_score_vs_iou(string directory){
 #if 1
     // write images
     string dir = "/home/carlo/bristoluni/short_individual_project/both_boxes/";
-    string det = "best_threshold/";
+    string det = "multi_clusters/";
     draw_boxes(&img,  gt_boxes, Scalar(0,255,0));
     draw_boxes(&img,  p_regions, Scalar(0,0,255));
     imwrite(dir + det + to_string(i) + ".jpg", img);
@@ -1143,7 +1143,7 @@ void dump_IoU_F1(vector<pair<float, float> >* overall_IoU_F1){
   string IoU = "";
   string f1_score = "";
   ofstream outfile;
-  outfile.open("./myexperiments/proposals/iou_vs_f1scores_threshold.txt");
+  outfile.open("./myexperiments/proposals/iou_vs_f1scores_multi_clusters.txt");
   int len = overall_IoU_F1->size();
   
   for(int i  = 0; i < len; i++){
@@ -1180,7 +1180,6 @@ int threshold_selection(Mat* image){
   int th_i = 128; // initial threshold
   bool converged = false;
   while(!converged && it < max_iter){
-    //fprintf(stderr, "actual threshold: %d\n", th_i);
     // segment image
     vector<pair<Point, int> > g1;
     vector<pair<Point, int> > g2;
