@@ -121,6 +121,7 @@ void get_centroids(Mat* centers, vector<Point2f>* centroids, int k);
 void find_regions_from_clusters(vector<Point2f>* centroids, vector<Point2f>* points, Mat* labels, int K, vector<Rect>* cnn_regions);
 void draw_boxes(Mat* image, vector<Rect>* regions);
 void draw_boxes(Mat* image,  vector<Rect>* boxes, Scalar color);
+int threshold_selection(Mat* image);
 
 // UTILITY FUNCTIONS
 pair<Mat, vector<Rect>* >* init_from_gt_file(string file_i); // from a file, return the image and the ground-truth boxes
@@ -801,6 +802,7 @@ vector<Rect>* region_proposal(Mat* image){
   // Convert the image to Gray
   cvtColor(*image, image_gray, CV_BGR2GRAY );
   // threshold
+  //threshold_value = threshold_selection(&image_gray);
   threshold( image_gray, th_image, threshold_value, max_BINARY_value, threshold_type );
   // window proposal
   vector<Rect> regions = proposal(&th_image);
@@ -1096,7 +1098,7 @@ void test_proposal_f1_score_vs_iou(string directory){
 #if 1
     // write images
     string dir = "/home/carlo/bristoluni/short_individual_project/both_boxes/";
-    string det = "baseline/";
+    string det = "best_threshold/";
     draw_boxes(&img,  gt_boxes, Scalar(0,255,0));
     draw_boxes(&img,  p_regions, Scalar(0,0,255));
     imwrite(dir + det + to_string(i) + ".jpg", img);
@@ -1142,7 +1144,7 @@ void dump_IoU_F1(vector<pair<float, float> >* overall_IoU_F1){
   string IoU = "";
   string f1_score = "";
   ofstream outfile;
-  outfile.open("./myexperiments/proposals/iou_vs_f1scores_baseline.txt");
+  outfile.open("./myexperiments/proposals/iou_vs_f1scores_threshold.txt");
   int len = overall_IoU_F1->size();
   
   for(int i  = 0; i < len; i++){
@@ -1172,4 +1174,35 @@ void draw_boxes(Mat* image,  vector<Rect>* boxes, Scalar color){
     Rect r = (*boxes)[i];
     rectangle(*image, r, color, 5);
   }
+}
+
+int threshold_selection(Mat* image){
+  int epsilon = 1, max_iter = 50, it = 0; // convergence criteria = abs(Ti - Ti+1) < epsilon
+  int th_i = 128; // initial threshold
+  bool converged = false;
+  while(!converged && it < max_iter){
+    //fprintf(stderr, "actual threshold: %d\n", th_i);
+    // segment image
+    vector<pair<Point, int> > g1;
+    vector<pair<Point, int> > g2;
+    for(int i = 0; i < image->rows; i++){
+      for(int j = 0; j < image->cols; j++){
+	int value = image->at<uchar>(j, i);
+	if(value > th_i)
+	  g1.push_back(pair<Point, int>(Point(j,i), value));
+	else
+	  g2.push_back(pair<Point, int>(Point(j,i), value));
+      }
+    }
+    // compute m1 and m2
+    float m1 = 0, m2 = 0;
+    for(unsigned int i = 0; i < g1.size(); i++) m1 += g1[i].second;
+    for(unsigned int i = 0; i < g2.size(); i++) m2 += g2[i].second;
+    m1 /= g1.size(); m2 /= g2.size();
+    int new_th = (m1 + m2) / 2;
+    if(abs(th_i - new_th) < epsilon) converged = true;
+    th_i = new_th;
+    it++;
+  }
+  return th_i;
 }
