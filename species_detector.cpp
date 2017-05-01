@@ -123,6 +123,7 @@ void draw_boxes(Mat* image, vector<Rect>* regions);
 void draw_boxes(Mat* image,  vector<Rect>* boxes, Scalar color);
 int threshold_selection(Mat* image);
 void remove_outliers(vector<Point2f>* centroids, vector<Point2f>* points, Mat* labels);
+vector<Rect>* cluster_analysis(vector<Point2f>* points, int n_clusters);
 
 // UTILITY FUNCTIONS
 pair<Mat, vector<Rect>* >* init_from_gt_file(string file_i); // from a file, return the image and the ground-truth boxes
@@ -797,7 +798,7 @@ void dump_score_vectors(Classifier classifier, ifstream& im_file, string dir){
 vector<Rect>* region_proposal(Mat* image){
   Mat image_gray, th_image;
   vector<Rect>* cnn_regions = new vector<Rect>;
-  vector<Point2f>* centroids = new vector<Point2f>;
+  // vector<Point2f>* centroids = new vector<Point2f>;
   // 1. Convert the image to Gray
   cvtColor(*image, image_gray, CV_BGR2GRAY );
   // 2. threshold
@@ -809,14 +810,9 @@ vector<Rect>* region_proposal(Mat* image){
   vector<Point2f> points = get_centers(regions);
   // 5. multi-clustering
   for(int i = 1; i <= K; i++){
-    Mat labels, centers;
-    kmeans(points, i, labels, TermCriteria( TermCriteria::EPS+TermCriteria::COUNT, 100, 1), 5, KMEANS_PP_CENTERS, centers);
-    // get centroids
-    get_centroids(&centers, centroids, i);
-    // remove outliers
-    remove_outliers(centroids, &points, &labels);
-    // get cnn regions
-    find_regions_from_clusters(centroids, &points, &labels, i, cnn_regions);
+    vector<Rect>* tmp = cluster_analysis(&points, i);
+    printf("k= %d, tmp size = %u\n", i, tmp->size());
+    cnn_regions->insert(cnn_regions->end(), tmp->begin(), tmp->end());
   }
   return cnn_regions;
 }
@@ -1239,4 +1235,19 @@ void remove_outliers(vector<Point2f>* centroids, vector<Point2f>* points, Mat* l
       p->y = mu.y;
     }
   }
+}
+
+vector<Rect>* cluster_analysis(vector<Point2f>* points, int n_clusters){
+  Mat labels, centers;
+  vector<Rect>* tmp = new vector<Rect>();
+  vector<Point2f> centroids = vector<Point2f>();
+  vector<Point2f> tmp_points(*points);
+  kmeans(tmp_points, n_clusters, labels, TermCriteria( TermCriteria::EPS+TermCriteria::COUNT, 100, 1), 5, KMEANS_PP_CENTERS, centers);
+  // get centroids
+  get_centroids(&centers, &centroids, n_clusters);
+  // remove outliers
+  remove_outliers(&centroids, &tmp_points, &labels);
+  // get cnn regions
+  find_regions_from_clusters(&centroids, &tmp_points, &labels, n_clusters, tmp);
+  return tmp;
 }
